@@ -1,0 +1,100 @@
+# Configuración base compartida por los tres grupos experimentales.
+# Cada config la hereda mediante `defaults: base.yaml`.
+# Cambiar aquí solo lo que deba ser idéntico entre grupos (validez experimental).
+
+seed: 0
+
+env:
+  rom_path: "roms/kirby.gb"
+  saves_dir: "saves"
+
+  # Preprocesado de observaciones
+  frame_skip: 4                 # frames de emulador por paso de agente
+  frame_stack: 4                # frames apilados como observación
+  screen_size: [84, 84]
+  grayscale: true
+
+  # Episodio
+  max_steps_per_episode: 4000   # pasos de agente (no frames)
+  max_frames_per_episode: 20000 # presupuesto duro en frames
+
+  # Espacio de acciones discreto (permite combos con '+')
+  # Kirby necesita saltar/absorber mientras camina para el plataformeo.
+  action_set:
+    ["noop", "left", "right", "up", "down", "a", "b",
+     "left+a", "right+a", "left+b", "right+b"]
+
+  # Falla rápido si las metas no son verificables con la RAM configurada.
+  strict_goal_check: true
+
+  # Direcciones de RAM confirmadas sobre la ROM USA/Europe (MD5 a66e4918...).
+  # Fuente: desensamblado huderlem/kirbydreamland + Data Crystal.
+  # `null` = no definida; el entorno falla rápido si una meta depende de ella.
+  ram:
+    hp: "0xD086"        # wHealth de Kirby (6 al empezar) — confirmado
+    boss_hp: "0xD093"   # salud actual del jefe (Whispy = 6) — confirmado
+    pos_x: "0xD051"     # wStageScrollTileX (scroll real; se reinicia por sala)
+    pos_y: "0xD052"     # wStageScrollTileY
+    room: "0xD03E"      # wCurStageScreen (sala dentro del nivel) — confirmado
+    game_over: null     # se deriva de hp <= 0 / vidas
+    stage_clear: null   # se deriva de boss_hp == 0
+
+  # ID de sala (`wCurStageScreen`) de cada etapa. Verificado con los save states.
+  # Green Greens: 0 = tramo 1, 1 = Poppy Bros. Sr., 2 = tramo 2,
+  #               3 = interior del árbol, 4 = arena de Whispy.
+  room_ids:
+    spawn: 0
+    mid: 2
+    door: 3
+    arena: 4
+
+  # Recompensa esparsa: el currículo reemplaza al reward shaping
+  reward:
+    win: 10.0
+    death: -5.0
+    damage: -0.5
+    progress: 0.0               # 0 = sin shaping; no modificar entre grupos
+    timeout: 0.0
+
+agent:
+  gamma: 0.997                  # horizonte ~330 pasos; clave con recompensa terminal
+  lr: 0.0001
+  batch_size: 32
+  buffer_size: 20000            # ~1.1 GB con obs + next_obs (4x84x84 uint8)
+  min_buffer_to_learn: 20000
+  train_freq: 4                 # un update cada N pasos de agente
+  target_update_freq: 1000      # en pasos de agente
+  grad_clip: 10.0
+  double_dqn: true
+
+  # Exploración: primera etapa con decaimiento largo; cada transición reinicia
+  # a `epsilon_stage_start` para no llegar sin exploración a una etapa nueva.
+  epsilon_start: 1.0
+  epsilon_end: 0.05
+  epsilon_decay_frames: 500000
+  epsilon_stage_start: 0.3
+  epsilon_stage_decay_frames: 150000
+
+curriculum:
+  enabled: false
+  order: "reverse"              # forward | reverse (o `sequence` explícita)
+  sequence: null                # p. ej. ["arena", "door", "mid", "spawn"]
+  frames: 1500000               # presupuesto del currículo
+  consolidation_frames: 500000  # fase final común: spawn -> jefe
+  window: 50                    # ventana deslizante de episodios
+  threshold: 0.85               # win rate requerido para avanzar
+  min_episodes_per_stage: 50    # ventana completa antes de poder avanzar
+  epsilon_gate: 0.10            # solo cuentan episodios con epsilon <= gate
+  replay_prob: 0.0              # muestreo mixto anti-olvido
+  fixed_steps_per_stage: null   # ablación: duración fija por etapa
+
+train:
+  total_frames: 2000000
+  eval_every_frames: 250000
+  eval_episodes: 10             # eval full-level (spawn -> jefe)
+  final_eval_episodes: 100      # S_final para la métrica P2
+  checkpoint_every_frames: 250000
+  log_every_episodes: 10
+  out_dir: "results"
+  run_name: null                # null -> se deriva del config y la semilla
+  device: "auto"                # auto | cpu | cuda

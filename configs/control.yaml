@@ -1,0 +1,9 @@
+# Grupo Control: DDQN estándar entrenado de inicio a fin desde X = 0.
+# Línea base original (ModusMorris) sin currículo. 2M frames full-level.
+defaults: base.yaml
+
+curriculum:
+  enabled: false
+
+train:
+  run_name: "control"

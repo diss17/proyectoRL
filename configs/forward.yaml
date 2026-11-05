@@ -1,0 +1,16 @@
+# Forward curriculum: spawn -> media -> puerta -> arena, con consolidación final.
+# Cada etapa se entrena hasta 85 % de éxito (ventana 50, solo eps <= 0.1).
+defaults: base.yaml
+
+curriculum:
+  enabled: true
+  order: "forward"
+  frames: 1500000
+  consolidation_frames: 500000
+  window: 50
+  threshold: 0.85
+  epsilon_gate: 0.10
+  replay_prob: 0.20
+
+train:
+  run_name: "forward"

@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ROM no versionada
+roms/*.gb
+roms/*.gbc
+
+# Resultados de experimentos (logs, checkpoints, figuras, tablas)
+results/*
+!results/.gitkeep
+
+# Notebooks
+.ipynb_checkpoints/
+
+.pytest_cache/

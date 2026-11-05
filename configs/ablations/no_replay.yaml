@@ -1,0 +1,14 @@
+# ABLACIÓN: reverse curriculum adaptativo sin muestreo mixto.
+# Aísla el aporte del anti-olvido (replay_prob = 0).
+defaults: ../base.yaml
+
+curriculum:
+  enabled: true
+  order: "reverse"
+  frames: 1500000
+  consolidation_frames: 500000
+  threshold: 0.85
+  replay_prob: 0.0
+
+train:
+  run_name: "ablation_no_replay"

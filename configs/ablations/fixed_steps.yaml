@@ -1,0 +1,15 @@
+# ABLACIÓN: reverse curriculum con duración fija por etapa.
+# No forma parte del experimento principal (control vs forward vs reverse).
+defaults: ../base.yaml
+
+curriculum:
+  enabled: true
+  order: "reverse"
+  frames: 1500000
+  consolidation_frames: 500000
+  replay_prob: 0.0
+  threshold: null
+  fixed_steps_per_stage: 375000
+
+train:
+  run_name: "ablation_fixed"
