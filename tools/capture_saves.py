@@ -15,7 +15,10 @@ interno del emulador; no son botones del juego.
 Cada guardado imprime el estado de RAM leído (HP, vidas, sala y salud del jefe)
 para que puedas comprobar que estás en la sala correcta.
 
-Sala (0xD03E): 0 = tramo 1, 1 = Poppy Bros. Sr., 2 = tramo 2,
+Graba las cuatro en una sola partida, sin morir y con hp lleno (6): el script
+avisa si una captura difiere en vida o vidas de las anteriores.
+
+Sala (0xD03E): 0 = tramo 1, 2 = tramo 2 (empieza con Poppy Bros. Sr.),
                3 = interior del árbol, 4 = arena de Whispy.
 
 Uso:
@@ -44,6 +47,7 @@ LIVES = 0xD089
 ROOM = 0xD03E
 BOSS_HP = 0xD093
 POS_X = 0xD051
+MAX_HP = 6
 
 
 def key_down(vk: int) -> bool:
@@ -56,6 +60,17 @@ def describe(pyboy) -> str:
         f"sala={pyboy.memory[ROOM]} jefe={pyboy.memory[BOSS_HP]} "
         f"x={pyboy.memory[POS_X]}"
     )
+
+
+def warn_if_uneven(pyboy, stage: str, lives_seen: dict[str, int]) -> None:
+    """Avisa si la captura no tiene vida llena o difiere en vidas de las demás."""
+    hp, lives = pyboy.memory[HP], pyboy.memory[LIVES]
+    if hp != MAX_HP:
+        print(f"  AVISO: hp={hp} (lo ideal es {MAX_HP}); repite la captura con vida llena")
+    lives_seen[stage] = lives
+    others = {s: v for s, v in lives_seen.items() if s != stage and v != lives}
+    if others:
+        print(f"  AVISO: vidas={lives} pero {others}; las etapas no son uniformes")
 
 
 def save_state(pyboy, path: pathlib.Path) -> None:
@@ -126,6 +141,7 @@ def main() -> int:
 
     prev: set[int] = set()
     saved: dict[str, int] = {}
+    lives_seen: dict[str, int] = {}
 
     try:
         running = True
@@ -142,6 +158,7 @@ def main() -> int:
                 save_state(pyboy, path)
                 saved[stage] = saved.get(stage, 0) + 1
                 print(f"[F{vk - 0x6F}] {stage:<6} -> {path}  ({describe(pyboy)})")
+                warn_if_uneven(pyboy, stage, lives_seen)
             prev = now
     except KeyboardInterrupt:
         print("\nInterrumpido.")

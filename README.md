@@ -24,6 +24,12 @@ y derrotar a Whispy Woods.
 | Mapa de RAM (`room_ids`, HP, coords) | ✅ verificado |
 | Save states de las 4 etapas | ✅ verificados |
 
+### Experimentos preliminares
+
+| Experimento | Resultado | Documento |
+|---|---|---|
+| Solo arena, 250k frames, semilla 0 | 0 % de victorias; la política aprende a esconderse. ~160 fps en CPU | [`docs/experimento_arena_only.md`](docs/experimento_arena_only.md) |
+
 ---
 
 ## Instalación

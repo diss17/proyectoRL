@@ -23,12 +23,14 @@ from pathlib import Path
 class Goal:
     """Meta de un episodio.
 
-    - ``reach``: llegar a la sala de la etapa `target`.
+    - ``reach``: llegar a la sala de la etapa `target`. Con ``defeat_boss``,
+      además hay que derrotar al jefe que aparece en esa sala (mini-jefe).
     - ``boss``:  derrotar al jefe final.
     """
 
     kind: str
     target: str | None = None
+    defeat_boss: bool = False
 
     def __post_init__(self) -> None:
         if self.kind not in ("reach", "boss"):
@@ -40,6 +42,8 @@ class Goal:
         if self.kind == "boss":
             return "derrotar al jefe"
         name = (stage_names or {}).get(self.target or "", self.target)
+        if self.defeat_boss:
+            return f"llegar a {name} y derrotar al mini-jefe"
         return f"llegar a {name}"
 
 
@@ -62,16 +66,19 @@ class Stage:
 # `room_id` es el valor de `wCurStageScreen` (0xD03E) verificado con los save
 # states. Puede sobreescribirse desde `env.room_ids` en el YAML.
 #
-# Green Greens: 0 = tramo 1, 1 = Poppy Bros. Sr., 2 = tramo 2,
+# Green Greens: 0 = tramo 1, 2 = tramo 2 (empieza con Poppy Bros. Sr.),
 #               3 = interior del árbol, 4 = arena de Whispy.
 STAGES: dict[str, Stage] = {
     "spawn": Stage(
         id="spawn",
         name="Spawn inicial",
         save_file="phase3_spawn.state",
-        description="Tramo exterior 1 desde el inicio del nivel.",
+        description="Tramo exterior 1 y combate contra Poppy Bros. Sr.",
         room_id=0,
-        goal=Goal("reach", "mid"),
+        # Poppy Bros. Sr. está al inicio de la sala 2 y `phase2_mid.state`
+        # empieza después de derrotarlo: sin `defeat_boss`, ninguna etapa
+        # entrenaría ese combate (verificado con la ROM).
+        goal=Goal("reach", "mid", defeat_boss=True),
     ),
     "mid": Stage(
         id="mid",
@@ -85,7 +92,7 @@ STAGES: dict[str, Stage] = {
         id="door",
         name="Interior del árbol",
         save_file="phase1_door.state",
-        description="Sala vertical previa a la arena de Whispy Woods.",
+        description="Subida vertical del árbol, desde la entrada (abajo).",
         room_id=3,
         goal=Goal("reach", "arena"),
     ),

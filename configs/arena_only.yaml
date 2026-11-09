@@ -1,0 +1,40 @@
+# EXPERIMENTO PRELIMINAR (segundo avance): DDQN entrenado solo en la etapa `arena`.
+# No forma parte del experimento principal (control vs forward vs reverse).
+#
+# Objetivo: comprobar que el agente aprende algo en nuestro entorno (curva de
+# retorno / supervivencia en la pelea contra Whispy) y medir los fps reales
+# entrenando en CPU antes de lanzar las 9 corridas.
+#
+# Diferencias con base.yaml (solo para este experimento):
+#   - min_buffer_to_learn 20000 -> 5000: empieza a actualizar antes.
+#   - epsilon_decay_frames 500000 -> 150000: el presupuesto es de 250k frames.
+#   - evaluación en arena (no full-level), cada 25k frames.
+#   - max_steps_per_episode 4000 -> 1500 (~6000 frames, ~100 s de juego):
+#     en el intento 1 la política greedy se escondía sin morir ni ganar y cada
+#     episodio de eval llegaba al tope de 4000 pasos (una eval de 20 episodios
+#     tardó ~6 min, más que el entrenamiento). Ver docs/experimento_arena_only.md.
+defaults: base.yaml
+
+env:
+  max_steps_per_episode: 1500
+
+agent:
+  min_buffer_to_learn: 5000
+  epsilon_decay_frames: 150000
+
+curriculum:
+  enabled: true
+  sequence: ["arena"]           # una sola etapa: nunca avanza
+  frames: 250000
+  consolidation_frames: 0
+  threshold: null
+  replay_prob: 0.0
+
+train:
+  total_frames: 250000
+  eval_every_frames: 25000
+  eval_episodes: 10
+  final_eval_episodes: 30
+  checkpoint_every_frames: 50000
+  eval_stage: "arena"
+  run_name: "arena_only"

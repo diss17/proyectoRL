@@ -36,6 +36,9 @@ class KirbyEnv(gym.Env):
         self.max_steps = int(cfg.get("max_steps_per_episode", 4000))
         self.max_frames = int(cfg.get("max_frames_per_episode", 20000))
         self.strict_goal_check = bool(cfg.get("strict_goal_check", True))
+        # PyBoy es determinista: sin no-ops aleatorios al reset, todos los
+        # episodios greedy desde un mismo save state serían idénticos.
+        self.reset_noop_max = int(cfg.get("reset_noop_max", 30))
 
         self.actions: list[list[str]] = _build_actions(cfg.get("action_set"))
         self.action_space = spaces.Discrete(len(self.actions))
@@ -58,6 +61,7 @@ class KirbyEnv(gym.Env):
         # La meta 'boss' solo puede cumplirse después de ver al jefe con vida.
         # Sin esto, un episodio full-level empezaría con boss_hp=0 y "ganaría".
         self._boss_engaged = False
+        self._lives_at_reset: int | None = None
         self.episode_steps = 0
         self.episode_frames = 0
         self.total_frames = 0
@@ -130,7 +134,17 @@ class KirbyEnv(gym.Env):
         self.episode_steps = 0
         self.episode_frames = 0
         self._boss_engaged = False
+        self._lives_at_reset = None
+
+        # No-ops aleatorios: rompen el determinismo del emulador sin cambiar la
+        # tarea. No cuentan en el presupuesto de frames del episodio.
+        if self.reset_noop_max > 0:
+            noops = int(self.np_random.integers(0, self.reset_noop_max + 1))
+            for _ in range(noops):
+                self._pyboy.tick()
+
         info = self._read_info()
+        self._lives_at_reset = info.get("lives")
 
         if self.strict_goal_check:
             self._validate_start(info)
@@ -155,6 +169,11 @@ class KirbyEnv(gym.Env):
                 raise ValueError(
                     "La meta 'reach' requiere leer el ID de sala, pero la dirección "
                     "de RAM `room` no está definida o no es legible."
+                )
+            if goal.defeat_boss and info.get("boss_hp") is None:
+                raise ValueError(
+                    "La meta requiere derrotar al mini-jefe, pero la dirección de "
+                    "RAM `boss_hp` no está definida o no es legible."
                 )
         else:
             boss_hp = info.get("boss_hp")
@@ -252,7 +271,17 @@ class KirbyEnv(gym.Env):
 
         hp = raw.get("hp")
         game_over = raw.get("game_over")
-        died = bool(hp is not None and hp <= 0) or bool(game_over)
+        lives = raw.get("lives")
+        # Caer a un pozo descuenta una vida sin pasar necesariamente por hp=0.
+        # Se compara contra el máximo visto en el episodio (un 1-up no la oculta).
+        lost_life = (
+            lives is not None
+            and self._lives_at_reset is not None
+            and lives < self._lives_at_reset
+        )
+        if lives is not None and self._lives_at_reset is not None and lives > self._lives_at_reset:
+            self._lives_at_reset = lives
+        died = bool(hp is not None and hp <= 0) or bool(game_over) or lost_life
 
         won = self._goal_reached(raw)
 
@@ -272,13 +301,26 @@ class KirbyEnv(gym.Env):
 
         if goal.kind == "reach":
             room = raw.get("room")
-            return bool(self._target_room is not None and room == self._target_room)
+            if self._target_room is None or room != self._target_room:
+                return False
+            if not goal.defeat_boss:
+                return True
+            # Al entrar a la sala el mini-jefe aún no aparece (boss_hp=0): solo
+            # cuenta llegar a 0 después de haberlo visto con vida.
+            boss_hp = raw.get("boss_hp")
+            if boss_hp is not None and boss_hp > 0:
+                self._boss_engaged = True
+            return bool(self._boss_engaged and boss_hp == 0)
 
         # Meta 'boss'
         if raw.get("stage_clear"):
             return True
         boss_hp = raw.get("boss_hp")
-        if boss_hp is not None and boss_hp > 0:
+        # `boss_hp` es la vida del jefe *actual*: al inicio de la sala 2 es la de
+        # Poppy Bros. Sr. Solo se arma la meta dentro de la arena de Whispy.
+        arena_room = self._room_of("arena")
+        in_arena = arena_room is None or raw.get("room") == arena_room
+        if in_arena and boss_hp is not None and boss_hp > 0:
             # El jefe ya apareció: a partir de aquí, llegar a 0 es victoria.
             self._boss_engaged = True
         return bool(self._boss_engaged and boss_hp == 0)

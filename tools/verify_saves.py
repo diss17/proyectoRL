@@ -5,7 +5,8 @@ Para cada archivo:
   - lee las variables de RAM confirmadas (HP, vidas, sala, jefe, scroll),
   - comprueba que la sala (`wCurStageScreen`, 0xD03E) es la esperada,
   - comprueba que en la arena `boss_hp` (0xD093) es distinto de 0,
-  - corre 120 frames sin input para comprobar que el punto es estable,
+  - corre 120 frames sin input para comprobar que el punto es estable
+    (Kirby no muere; perder algo de hp en la arena es normal),
   - guarda una captura en `saves/previews/`.
 
 Uso:
@@ -118,10 +119,14 @@ def main() -> int:
         deterministic = screen_hash(pyboy) == first_hash
 
         # 3) estabilidad sin input
-        hp_before = pyboy.memory[HP]
+        # Criterio: Kirby no muere sin input. En la arena Whispy ataca desde
+        # el primer momento, así que perder algo de hp ahí es normal.
+        hp_before, lives_before = pyboy.memory[HP], pyboy.memory[LIVES]
         for _ in range(args.frames):
             pyboy.tick()
-        stable = pyboy.memory[HP] == hp_before
+        hp_after = pyboy.memory[HP]
+        stable = hp_after > 0 and pyboy.memory[LIVES] == lives_before
+        hp_lost = hp_before - hp_after
 
         # 4) la sala leída debe ser la esperada y no repetirse entre etapas
         room_ok = data["sala"] == expected_room
@@ -143,6 +148,9 @@ def main() -> int:
             f"{'OK' if stable else 'CAMBIA':>8} "
             f"{'OK' if room_ok else 'FALLA':>8}"
         )
+        if stable and hp_lost > 0:
+            print(f"  nota: pierde {hp_lost} hp en {args.frames} frames sin input "
+                  "(sin morir)")
         if not boss_ok:
             print(f"  AVISO: boss_hp={data['jefe']} inesperado en {stage}")
 

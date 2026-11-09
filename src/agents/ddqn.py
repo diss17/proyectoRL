@@ -48,6 +48,7 @@ class DDQNAgent:
         n_actions: int,
         cfg: dict[str, Any],
         device: str = "cpu",
+        seed: int = 0,
     ) -> None:
         self.cfg = cfg
         self.device = torch.device(device)
@@ -74,7 +75,8 @@ class DDQNAgent:
             self.observation_shape,
             self.n_actions,
         )
-        self._rng = np.random.default_rng(0)
+        # Exploración y muestreo del buffer dependen de la semilla del experimento.
+        self._rng = np.random.default_rng(int(seed))
         self.learn_steps = 0
 
     # ------------------------------------------------------------------ #

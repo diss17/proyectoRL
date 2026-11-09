@@ -107,12 +107,12 @@ def test_final_position_never_advances() -> None:
     assert sched.current_stage == "spawn"
 
 
-def test_fixed_steps_mode_ignores_win_rate() -> None:
-    sched = CurriculumScheduler(REVERSE, threshold=None, fixed_steps_per_stage=1000)
-    sched.add_steps("arena", 999)
+def test_fixed_frames_mode_ignores_win_rate() -> None:
+    sched = CurriculumScheduler(REVERSE, threshold=None, fixed_frames_per_stage=1000)
+    sched.add_frames("arena", 999)
     assert sched.maybe_advance() is None
 
-    sched.add_steps("arena", 1)
+    sched.add_frames("arena", 1)
     assert sched.maybe_advance() == "door"
 
 
@@ -121,7 +121,7 @@ def test_state_dict_roundtrip_with_sequence() -> None:
     for won in [True, False, True, True]:
         sched.record_episode("spawn", won, epsilon=0.05)
     sched.position = 1
-    sched.add_steps("spawn", 123)
+    sched.add_frames("spawn", 123)
 
     clone = CurriculumScheduler(["spawn"])
     clone.load_state_dict(sched.state_dict())
@@ -129,7 +129,7 @@ def test_state_dict_roundtrip_with_sequence() -> None:
     assert clone.stage_ids == FORWARD
     assert clone.current_stage == "mid"
     assert clone.stage_episodes["spawn"] == 4
-    assert clone.stage_steps["spawn"] == 123
+    assert clone.stage_frames["spawn"] == 123
     assert clone.win_rate("spawn") == pytest.approx(sched.win_rate("spawn"))
     assert clone.state_dict() == sched.state_dict()
 
@@ -142,7 +142,7 @@ def test_build_scheduler_from_config() -> None:
             "replay_prob": 0.2,
             "epsilon_gate": 0.1,
             "min_episodes_per_stage": 50,
-            "fixed_steps_per_stage": None,
+            "fixed_frames_per_stage": None,
         },
         REVERSE,
     )

@@ -138,7 +138,8 @@ EPISODE_FIELDS = [
 ]
 
 EVAL_FIELDS = [
-    "frame",
+    "frame",          # punto nominal de la grilla (múltiplo de eval_every)
+    "frame_actual",   # contador real de frames al evaluar
     "phase",
     "episodes",
     "wins",

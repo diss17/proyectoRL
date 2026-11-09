@@ -22,6 +22,7 @@ class FakeEnv:
         self.observation_space = SimpleNamespace(shape=(4, 8, 8))
         self.total_frames = 0
         self.episode_steps = 0
+        self.episode_frames = 0
         self.stage = None
         self.goal = None
         self._attempts: dict[str, int] = {}
@@ -31,6 +32,7 @@ class FakeEnv:
         self.stage = options.get("stage")
         self.goal = options.get("goal")
         self.episode_steps = 0
+        self.episode_frames = 0
         return np.zeros((4, 8, 8), dtype=np.uint8), {
             "stage": self.stage,
             "goal": str(self.goal),
@@ -39,6 +41,7 @@ class FakeEnv:
 
     def step(self, action):
         self.episode_steps += 1
+        self.episode_frames += 1
         self.total_frames += 1
         done = self.episode_steps >= 3
         attempt = self._attempts.get(self.stage, 0)
@@ -58,15 +61,17 @@ class FakeEnv:
 
 
 class FakeAgent:
-    def __init__(self, observation_shape, n_actions, cfg, device="cpu"):
+    def __init__(self, observation_shape, n_actions, cfg, device="cpu", seed=0):
         self.cfg = cfg
+        self.seed = seed
         self.saved: list[Path] = []
+        self.pushed: list[bool] = []
 
     def act(self, obs, epsilon=0.0):
         return 0
 
-    def push(self, *args, **kwargs):
-        return None
+    def push(self, obs, action, reward, next_obs, done):
+        self.pushed.append(bool(done))
 
     def update(self):
         return 0.01
@@ -117,7 +122,7 @@ def tiny_config(tmp_path):
             "min_episodes_per_stage": 2,
             "epsilon_gate": 1.0,
             "replay_prob": 0.0,
-            "fixed_steps_per_stage": None,
+            "fixed_frames_per_stage": None,
         },
         "train": {
             "total_frames": 18,
@@ -176,3 +181,65 @@ def test_control_has_single_phase(tiny_config):
     assert phases[0].stage == "spawn"
     assert phases[0].goal == "boss"
     assert phases[0].scheduler is None
+
+
+class TruncatingEnv(FakeEnv):
+    """Episodios que siempre terminan por timeout (truncated), nunca terminated."""
+
+    def step(self, action):
+        obs, reward, _, _, info = super().step(action)
+        truncated = self.episode_steps >= 3
+        return obs, 0.0, False, truncated, {**info, "won": False}
+
+
+def test_truncation_is_not_stored_as_terminal(tiny_config, monkeypatch):
+    agents: list[FakeAgent] = []
+
+    def make_agent(*args, **kwargs):
+        agent = FakeAgent(*args, **kwargs)
+        agents.append(agent)
+        return agent
+
+    tiny_config["curriculum"]["enabled"] = False
+    monkeypatch.setattr(train_module, "KirbyEnv", TruncatingEnv)
+    monkeypatch.setattr(train_module, "DDQNAgent", make_agent)
+
+    train_module.run(tiny_config)
+
+    assert agents[0].pushed, "el agente no recibió transiciones"
+    assert not any(agents[0].pushed), "un timeout se guardó como estado terminal"
+
+
+def test_agent_receives_experiment_seed(tiny_config, monkeypatch):
+    agents: list[FakeAgent] = []
+
+    def make_agent(*args, **kwargs):
+        agent = FakeAgent(*args, **kwargs)
+        agents.append(agent)
+        return agent
+
+    tiny_config["seed"] = 2
+    monkeypatch.setattr(train_module, "KirbyEnv", FakeEnv)
+    monkeypatch.setattr(train_module, "DDQNAgent", make_agent)
+
+    train_module.run(tiny_config)
+    assert agents[0].seed == 2
+
+
+def test_evals_are_logged_on_nominal_grid(tiny_config, monkeypatch):
+    monkeypatch.setattr(train_module, "KirbyEnv", FakeEnv)
+    monkeypatch.setattr(train_module, "DDQNAgent", FakeAgent)
+
+    train_module.run(tiny_config)
+
+    run_dir = Path(tiny_config["train"]["out_dir"]) / "smoke_s0"
+    with (run_dir / "evals.csv").open(encoding="utf-8") as fh:
+        evals = list(csv.DictReader(fh))
+
+    every = tiny_config["train"]["eval_every_frames"]
+    periodic = [r for r in evals if r["phase"] != "final"]
+    assert periodic
+    for row in periodic:
+        assert int(row["frame"]) % every == 0
+        assert int(row["frame_actual"]) >= int(row["frame"])
+    assert int(evals[-1]["frame"]) == tiny_config["train"]["total_frames"]

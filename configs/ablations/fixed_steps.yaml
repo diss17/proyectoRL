@@ -9,7 +9,7 @@ curriculum:
   consolidation_frames: 500000
   replay_prob: 0.0
   threshold: null
-  fixed_steps_per_stage: 375000
+  fixed_frames_per_stage: 375000   # 4 etapas x 375k = 1.5M frames de currículo
 
 train:
   run_name: "ablation_fixed"
