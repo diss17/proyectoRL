@@ -90,7 +90,9 @@ def test_curriculum_budget_matches_total_frames() -> None:
 
 def test_ablations_load_through_parent_default() -> None:
     cfg = load_config(CONFIG_DIR / "ablations" / "fixed_steps.yaml")
-    assert cfg["curriculum"]["fixed_steps_per_stage"] == 375_000
+    assert cfg["curriculum"]["fixed_frames_per_stage"] == 375_000
+    # 4 etapas x presupuesto fijo debe caber en el currículo (en frames).
+    assert 4 * cfg["curriculum"]["fixed_frames_per_stage"] <= cfg["curriculum"]["frames"]
     assert cfg["agent"]["gamma"] == pytest.approx(0.997)
 
 
@@ -175,3 +177,18 @@ def test_retention_and_success_rate() -> None:
     assert retention_score(0.8, 0.4) == pytest.approx(0.5)
     assert retention_score(0.8, 1.0) == pytest.approx(1.0)
     assert success_rate([True, False, True, True]) == pytest.approx(0.75)
+
+
+def test_final_eval_row_is_excluded_from_curve_metrics() -> None:
+    rows = [
+        {"frame": 250_000, "phase": "curriculum", "win_rate": 0.5, "episodes": 10},
+        {"frame": 500_000, "phase": "curriculum", "win_rate": 0.8, "episodes": 10},
+        {"frame": 500_000, "phase": "final", "win_rate": 0.9, "episodes": 100},
+    ]
+    # S_final sigue saliendo de la evaluación final de 100 episodios.
+    assert final_success(rows) == pytest.approx(0.9)
+    curve = group_curve([rows])
+    assert [c["frame"] for c in curve] == [250_000, 500_000]
+    assert curve[-1]["win_rate"] == pytest.approx(0.8)
+    # P1 sin confirmación disponible usa la última periódica, no la final.
+    assert frames_to_threshold(rows, threshold=0.8) == 500_000

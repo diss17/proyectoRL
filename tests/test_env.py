@@ -21,6 +21,7 @@ BOSS_HP = 0xD093
 POS_X = 0xD051
 POS_Y = 0xD052
 ROOM = 0xD03E
+LIVES = 0xD089
 
 
 class FakeScreen:
@@ -72,6 +73,7 @@ def make_env(tmp_path, **overrides) -> KirbyEnv:
         "strict_goal_check": True,
         "room_ids": {"spawn": 0, "mid": 2, "door": 3, "arena": 4},
         "reward": {"win": 10.0, "death": -5.0, "damage": -0.5},
+        "reset_noop_max": 0,
     }
     cfg.update(overrides)
 
@@ -93,7 +95,7 @@ def test_reach_goal_wins_on_room_change(tmp_path) -> None:
     env.pyboy.memory[HP] = 6
     env.pyboy.memory[ROOM] = 0
 
-    obs, info = env.reset(options={"stage": "spawn"})
+    obs, info = env.reset(options={"stage": "spawn", "goal": "mid"})
     assert info["stage"] == "spawn"
     assert info["goal"] == "llegar a Sección media"
 
@@ -240,4 +242,99 @@ def test_explicit_goal_string_is_accepted(tmp_path) -> None:
     env.pyboy.memory[ROOM] = 3
     _, reward, terminated, _, _ = env.step(0)
     assert terminated and reward == pytest.approx(10.0)
+    env.close()
+
+
+def test_full_level_does_not_win_on_mid_boss(tmp_path) -> None:
+    """Poppy Bros. Sr. (inicio de la sala 2) usa la misma dirección que el jefe."""
+    env = make_env(tmp_path)
+    env.pyboy.memory[HP] = 6
+    env.pyboy.memory[ROOM] = 0
+    env.reset(options={"stage": "spawn", "goal": "boss"})
+
+    # Mini-jefe al inicio de la sala 2 (boss_hp=3 en el juego real), luego derrotado.
+    env.pyboy.memory[ROOM] = 2
+    env.pyboy.memory[BOSS_HP] = 3
+    env.step(0)
+    assert env._boss_engaged is False
+
+    env.pyboy.memory[BOSS_HP] = 0
+    _, reward, terminated, _, info = env.step(0)
+    assert not terminated
+    assert info["won"] is False
+    assert reward == pytest.approx(0.0)
+    env.close()
+
+
+def test_losing_a_life_ends_episode_even_with_hp(tmp_path) -> None:
+    """Caer a un pozo descuenta una vida sin poner hp a 0."""
+    env = make_env(tmp_path)
+    env.pyboy.memory[HP] = 6
+    env.pyboy.memory[ROOM] = 0
+    env.pyboy.memory[LIVES] = 4
+    env.reset(options={"stage": "spawn"})
+
+    env.pyboy.memory[LIVES] = 3
+    _, reward, terminated, _, info = env.step(0)
+    assert terminated and info["died"] is True
+    assert reward == pytest.approx(-5.0)
+    env.close()
+
+
+def test_extra_life_does_not_mask_a_later_death(tmp_path) -> None:
+    env = make_env(tmp_path)
+    env.pyboy.memory[HP] = 6
+    env.pyboy.memory[ROOM] = 0
+    env.pyboy.memory[LIVES] = 4
+    env.reset(options={"stage": "spawn"})
+
+    env.pyboy.memory[LIVES] = 5  # 1-up
+    _, _, terminated, _, _ = env.step(0)
+    assert not terminated
+
+    env.pyboy.memory[LIVES] = 4  # pierde la vida ganada
+    _, _, terminated, _, info = env.step(0)
+    assert terminated and info["died"] is True
+    env.close()
+
+
+def test_reset_noops_are_seeded_and_vary(tmp_path) -> None:
+    env = make_env(tmp_path, reset_noop_max=30)
+    env.pyboy.memory[HP] = 6
+    env.pyboy.memory[ROOM] = 0
+
+    def noops(seed):
+        before = env.pyboy.frames
+        env.reset(seed=seed, options={"stage": "spawn"})
+        return env.pyboy.frames - before
+
+    counts = [noops(s) for s in range(20)]
+    assert all(0 <= c <= 30 for c in counts)
+    assert len(set(counts)) > 1, "los resets deben variar entre semillas"
+    assert noops(7) == noops(7), "misma semilla -> mismos no-ops"
+    # Los no-ops no cuentan en el presupuesto del episodio.
+    assert env.episode_frames == 0
+    env.close()
+
+
+def test_spawn_goal_requires_defeating_the_mini_boss(tmp_path) -> None:
+    env = make_env(tmp_path)
+    env.pyboy.memory[HP] = 6
+    env.pyboy.memory[ROOM] = 0
+    _, info = env.reset(options={"stage": "spawn"})
+    assert info["goal"] == "llegar a Sección media y derrotar al mini-jefe"
+
+    # Entra a la sala 2: el mini-jefe aún no aparece -> no gana.
+    env.pyboy.memory[ROOM] = 2
+    _, _, terminated, _, info = env.step(0)
+    assert not terminated and info["won"] is False
+
+    # Aparece con vida y luego cae a 0 -> gana.
+    env.pyboy.memory[BOSS_HP] = 3
+    _, _, terminated, _, _ = env.step(0)
+    assert not terminated
+    env.pyboy.memory[BOSS_HP] = 0
+    _, reward, terminated, _, info = env.step(0)
+    assert terminated and info["won"] is True
+    assert reward == pytest.approx(10.0)
     env.close()

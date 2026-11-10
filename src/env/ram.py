@@ -14,6 +14,7 @@ Variable         Address   Valores observados (spawn/mid/door/arena)
 ``hp``           0xD086    6 / 2 / 5 / 5
 ``boss_hp``      0xD093    0 / 0 / 0 / 6
 ``room``         0xD03E    0 / 2 / 3 / 4
+``lives``        0xD089    vidas restantes (detecta muertes por pozo)
 ``pos_x``        0xD051    scroll real en tiles (se reinicia por sala)
 ``pos_y``        0xD052    scroll real en tiles
 ===============  ========  =========================================
@@ -38,6 +39,7 @@ class RamAddresses:
     pos_x: int | None = 0xD051       # wStageScrollTileX (se reinicia por sala)
     pos_y: int | None = 0xD052       # wStageScrollTileY
     room: int | None = 0xD03E        # wCurStageScreen (sala dentro del nivel)
+    lives: int | None = 0xD089       # vidas restantes; bajar = muerte (p. ej. pozo)
     game_over: int | None = None     # se deriva de hp <= 0 / vidas
     stage_clear: int | None = None   # se deriva de boss_hp == 0
 

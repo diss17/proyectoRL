@@ -15,3 +15,10 @@ results/*
 .ipynb_checkpoints/
 
 .pytest_cache/
+
+# Corridas de humo locales (checkpoints pesados)
+results_smoke/
+
+# Guardados sueltos del emulador y respaldos de capturas
+roms/*.state
+saves/*.bak

@@ -15,6 +15,9 @@ from .utils import load_config, resolve_device, set_seed
 
 SPAWN = "spawn"
 BOSS_GOAL = "boss"
+# Semilla base de los resets de evaluación: idéntica para todos los grupos y
+# semillas de entrenamiento, así las evaluaciones son pareadas.
+EVAL_SEED = 1_000_000
 
 
 def evaluate_policy(
@@ -25,14 +28,21 @@ def evaluate_policy(
     goal: str | None = BOSS_GOAL,
     episodes: int = 10,
     max_steps: int | None = None,
+    seed: int | None = None,
 ) -> dict[str, Any]:
-    """Corre `episodes` episodios sin exploración y reporta victorias."""
+    """Corre `episodes` episodios sin exploración y reporta victorias.
+
+    Con `seed`, el episodio i usa `reset(seed=seed + i)`: los no-ops iniciales
+    varían entre episodios pero son los mismos en cada evaluación y en cada
+    grupo, lo que hace la comparación pareada.
+    """
     wins = 0
     returns: list[float] = []
     lengths: list[int] = []
 
-    for _ in range(episodes):
-        obs, _ = env.reset(options={"stage": stage, "goal": goal})
+    for i in range(episodes):
+        reset_seed = None if seed is None else int(seed) + i
+        obs, _ = env.reset(seed=reset_seed, options={"stage": stage, "goal": goal})
         done = False
         ep_return = 0.0
         steps = 0
@@ -64,10 +74,10 @@ def evaluate_policy(
 
 
 def evaluate_full_level(
-    agent: DDQNAgent, env: KirbyEnv, episodes: int = 100
+    agent: DDQNAgent, env: KirbyEnv, episodes: int = 100, seed: int | None = None
 ) -> dict[str, Any]:
     return evaluate_policy(
-        agent, env, stage=SPAWN, goal=BOSS_GOAL, episodes=episodes
+        agent, env, stage=SPAWN, goal=BOSS_GOAL, episodes=episodes, seed=seed
     )
 
 
@@ -80,6 +90,7 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--device", default="auto")
+    parser.add_argument("--seed", type=int, default=EVAL_SEED, help="semilla base de los resets")
     args = parser.parse_args()
 
     import torch
@@ -90,7 +101,13 @@ def main() -> None:
 
     device = resolve_device(args.device)
     env = KirbyEnv(cfg["env"])
-    agent = DDQNAgent(env.observation_space.shape, env.action_space.n, cfg["agent"], device=device)
+    agent = DDQNAgent(
+        env.observation_space.shape,
+        env.action_space.n,
+        cfg["agent"],
+        device=device,
+        seed=int(cfg.get("seed", 0)),
+    )
     agent.load(args.checkpoint)
 
     results = evaluate_policy(
@@ -99,6 +116,7 @@ def main() -> None:
         stage=args.stage,
         goal=args.goal,
         episodes=args.episodes,
+        seed=args.seed,
     )
     env.close()
 

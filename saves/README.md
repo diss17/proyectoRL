@@ -6,9 +6,9 @@ Los archivos y sus IDs:
 | Archivo | ID de etapa | Sala (`0xD03E`) | Punto del juego | Meta local |
 |---|---|---|---|---|
 | `phase0_whispy.state` | `arena` | 4 | Inicio de la arena de Whispy Woods | Derrotar al jefe |
-| `phase1_door.state` | `door` | 3 | Interior del árbol, tramo vertical previo a la arena | Entrar a la arena |
-| `phase2_mid.state` | `mid` | 2 | Tramo exterior 2, tras Poppy Bros. Sr. | Llegar al interior del árbol |
-| `phase3_spawn.state` | `spawn` | 0 | Spawn inicial, X = 0 | Llegar al tramo exterior 2 |
+| `phase1_door.state` | `door` | 3 | Interior del árbol, en la entrada (abajo) | Entrar a la arena |
+| `phase2_mid.state` | `mid` | 2 | Tramo exterior 2, tras derrotar a Poppy Bros. Sr. | Llegar al interior del árbol |
+| `phase3_spawn.state` | `spawn` | 0 | Spawn inicial, X = 0 | Llegar a la sala 2 y derrotar a Poppy Bros. Sr. |
 
 El mismo conjunto sirve para el currículo **forward** (`spawn → mid → door →
 arena`) y el **reverse** (`arena → door → mid → spawn`).
@@ -44,8 +44,10 @@ con interfaz de archivo**, no una ruta. El wrapper ya lo hace así.
 | Scroll real X | `0xD051` | 1 | 10 | 5 | 1 |
 | Scroll real Y | `0xD052` | 1 | 1 | 1 | 17 |
 
-Green Greens usa las salas `0` (tramo 1), `1` (Poppy Bros. Sr.), `2` (tramo 2),
-`3` (interior del árbol) y `4` (arena). Las direcciones provienen del
+Green Greens usa las salas `0` (tramo 1), `2` (tramo 2, que empieza con
+Poppy Bros. Sr.), `3` (interior del árbol) y `4` (arena). La sala `1` no se
+visita en el camino principal (verificado con la ROM). Poppy Bros. Sr. usa la
+misma dirección de vida del jefe (`0xD093` = 3 al aparecer). Las direcciones provienen del
 desensamblado [huderlem/kirbydreamland](https://github.com/huderlem/kirbydreamland).
 
 ## Cómo generarlos
@@ -88,24 +90,32 @@ conserva como `.bak`.
 
 ## Dónde capturar cada etapa (Green Greens)
 
-Green Greens tiene **5 salas** en este orden:
+Green Greens se recorre en este orden (sala de RAM entre paréntesis):
 
-1. **Tramo exterior** — caminas a la derecha entre Waddle Dees, Bronto Burts y
-   Cappies. Termina en una **puerta** (caminas dentro y pulsas `Arriba`).
-2. **Poppy Bros. Sr.** — miniboss de una sola pantalla.
-3. **Segundo tramo exterior** — más enemigos y plataformas. Termina en otra puerta.
-4. **Dentro del árbol** — sala **vertical**: hay que **volar hacia arriba**
+1. **Tramo exterior** (0) — caminas a la derecha entre Waddle Dees, Bronto
+   Burts y Cappies. Termina en una **puerta** (caminas dentro y pulsas `Arriba`).
+2. **Segundo tramo exterior** (2) — empieza con el miniboss **Poppy Bros. Sr.**;
+   tras derrotarlo sigue el tramo con más enemigos y otra puerta al final.
+3. **Dentro del árbol** (3) — sala **vertical**: hay que **volar hacia arriba**
    (salta con `A` y mantén `A` para flotar) esquivando enemigos.
-5. **Whispy Woods** — caes por un agujero del suelo y aparece el jefe.
+4. **Whispy Woods** (4) — aparece el jefe.
 
 Capturas recomendadas:
 
 | Tecla | Cuándo | Qué es |
 |---|---|---|
-| `F1` | Al empezar, sin moverte | `spawn` (sala 0) |
-| `F2` | Al entrar al tramo exterior 2, tras el miniboss | `mid` (sala 2) |
-| `F3` | Al entrar al interior del árbol (sala vertical) | `door` (sala 3) |
-| `F4` | Cuando ya ves a Whispy Woods | `arena` (sala 4) |
+| `F1` | Al empezar, sin moverte | `spawn` (sala 0, jefe 0) |
+| `F2` | Justo después de derrotar a Poppy Bros. Sr. | `mid` (sala 2, jefe 0) |
+| `F3` | Nada más entrar al árbol, abajo, antes de subir | `door` (sala 3, jefe 0) |
+| `F4` | Cuando ya ves a Whispy Woods | `arena` (sala 4, jefe 6) |
+
+**Uniformidad entre etapas.** Graba las cuatro en **una sola partida sin
+morir** y con la **vida llena (hp = 6)** en cada captura, para que todas
+empiecen con la misma vida y el mismo contador de vidas en el HUD (el HUD es
+parte de la observación). El script avisa si una captura difiere. No corrijas
+vida o vidas escribiendo en la RAM: el HUD no se redibuja y la pantalla queda
+incoherente. Truco: pulsa `Z` antes de un tramo difícil y `X` para volver ahí
+si te golpean (es el estado interno del emulador, no afecta a las capturas).
 
 La tecla `F3` es la más importante: el agente aprenderá a salir del árbol y
 entrar a la arena desde ahí. Si te equivocas, vuelve a pulsar la tecla en el

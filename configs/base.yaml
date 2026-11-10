@@ -18,6 +18,11 @@ env:
   max_steps_per_episode: 4000   # pasos de agente (no frames)
   max_frames_per_episode: 20000 # presupuesto duro en frames
 
+  # Estocasticidad: PyBoy es determinista, así que sin esto todos los episodios
+  # greedy desde un save state son idénticos (win rate 0 % o 100 %).
+  # En cada reset se ejecutan U{0..N} frames sin input, sembrados con `seed`.
+  reset_noop_max: 30
+
   # Espacio de acciones discreto (permite combos con '+')
   # Kirby necesita saltar/absorber mientras camina para el plataformeo.
   action_set:
@@ -36,11 +41,12 @@ env:
     pos_x: "0xD051"     # wStageScrollTileX (scroll real; se reinicia por sala)
     pos_y: "0xD052"     # wStageScrollTileY
     room: "0xD03E"      # wCurStageScreen (sala dentro del nivel) — confirmado
+    lives: "0xD089"     # vidas restantes: perder una = muerte (caída a pozo sin hp=0)
     game_over: null     # se deriva de hp <= 0 / vidas
     stage_clear: null   # se deriva de boss_hp == 0
 
   # ID de sala (`wCurStageScreen`) de cada etapa. Verificado con los save states.
-  # Green Greens: 0 = tramo 1, 1 = Poppy Bros. Sr., 2 = tramo 2,
+  # Green Greens: 0 = tramo 1, 2 = tramo 2 (empieza con Poppy Bros. Sr.),
   #               3 = interior del árbol, 4 = arena de Whispy.
   room_ids:
     spawn: 0
@@ -63,7 +69,7 @@ agent:
   buffer_size: 20000            # ~1.1 GB con obs + next_obs (4x84x84 uint8)
   min_buffer_to_learn: 20000
   train_freq: 4                 # un update cada N pasos de agente
-  target_update_freq: 1000      # en pasos de agente
+  target_update_freq: 1000      # en updates de gradiente (= 4000 pasos con train_freq 4)
   grad_clip: 10.0
   double_dqn: true
 
@@ -86,7 +92,7 @@ curriculum:
   min_episodes_per_stage: 50    # ventana completa antes de poder avanzar
   epsilon_gate: 0.10            # solo cuentan episodios con epsilon <= gate
   replay_prob: 0.0              # muestreo mixto anti-olvido
-  fixed_steps_per_stage: null   # ablación: duración fija por etapa
+  fixed_frames_per_stage: null  # ablación: duración fija por etapa (frames de emulador)
 
 train:
   total_frames: 2000000

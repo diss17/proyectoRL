@@ -58,6 +58,7 @@ def retention_score(before: float, after: float) -> float:
 
 NUMERIC_EVAL_FIELDS = (
     "frame",
+    "frame_actual",
     "episodes",
     "wins",
     "win_rate",
@@ -80,10 +81,23 @@ def read_evals(csv_path: str | Path) -> list[dict[str, Any]]:
                 row["episodes"] = int(row["episodes"])
             if "frame" in row:
                 row["frame"] = int(row["frame"])
+            if isinstance(row.get("frame_actual"), float):
+                row["frame_actual"] = int(row["frame_actual"])
             rows.append(row)
 
     rows.sort(key=lambda r: r["frame"])
     return rows
+
+
+def curve_rows(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Evaluaciones periódicas de la curva (sin la evaluación final de 100 ep.).
+
+    La final comparte frame con la última periódica; incluirla duplicaría ese
+    punto en P1, en el suavizado de P2 y en la curva de grupo.
+    """
+    return sorted(
+        (r for r in rows if r.get("phase") != "final"), key=lambda r: r["frame"]
+    )
 
 
 def final_success(rows: Sequence[dict[str, Any]]) -> float:
@@ -104,7 +118,7 @@ def frames_to_threshold(
     Con `confirm=True`, la evaluación siguiente también debe superar el umbral
     (si existe). Devuelve `None` si nunca ocurre.
     """
-    rows = sorted(rows, key=lambda r: r["frame"])
+    rows = curve_rows(rows)
     for i, row in enumerate(rows):
         if float(row["win_rate"]) < threshold:
             continue
@@ -130,11 +144,11 @@ def convergence_frame(
       3. Converge en la evaluación i si desde i en adelante la curva suavizada
          nunca baja de ``band * S_final``.
     """
-    rows = sorted(rows, key=lambda r: r["frame"])
+    s_final = final_success(rows) if final is None else float(final)
+    rows = curve_rows(rows)
     if len(rows) < window:
         return None
 
-    s_final = final_success(rows) if final is None else float(final)
     if s_final < gate:
         return None
 
@@ -175,7 +189,7 @@ def group_curve(
     """Curva promedio por frame a través de semillas (para graficar)."""
     by_frame: dict[int, list[float]] = {}
     for run in runs:
-        for row in run:
+        for row in curve_rows(run):
             by_frame.setdefault(int(row["frame"]), []).append(float(row["win_rate"]))
 
     curve = []

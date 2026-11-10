@@ -11,7 +11,7 @@ from .agents.ddqn import DDQNAgent
 from .curriculum.scheduler import CurriculumScheduler, build_scheduler
 from .curriculum.stages import build_sequence, describe_sequence, validate_saves
 from .env.kirby_env import KirbyEnv
-from .evaluate import evaluate_policy
+from .evaluate import EVAL_SEED, evaluate_policy
 from .utils import (
     EpisodeLogger,
     EvalLogger,
@@ -142,17 +142,25 @@ def run(cfg: dict[str, Any], resume: Path | None = None) -> None:
                 print(f"  - {path}")
         print()
 
+    seed = int(cfg.get("seed", 0))
     env = KirbyEnv(cfg["env"])
     obs_shape = env.observation_space.shape
-    agent = DDQNAgent(obs_shape, env.action_space.n, cfg["agent"], device=device)
+    agent = DDQNAgent(obs_shape, env.action_space.n, cfg["agent"], device=device, seed=seed)
 
     start_frames = 0
+    episode = 0
+    saved_loop: dict[str, Any] = {}
     if resume is not None:
         payload = agent.load(resume)
         start_frames = int(payload.get("total_frames", 0))
+        episode = int(payload.get("episode", 0))
+        saved_loop = dict(payload.get("loop") or {})
         if "scheduler" in payload and phases[0].scheduler is not None:
             phases[0].scheduler.load_state_dict(payload["scheduler"])
-        print(f"Reanudando desde {resume} (frames={start_frames})")
+        print(
+            f"Reanudando desde {resume} (frames={start_frames}, episodio={episode}). "
+            "Nota: el replay buffer no se guarda y se rellena desde cero."
+        )
         env.total_frames = start_frames
 
     train_cfg = cfg["train"]
@@ -164,10 +172,14 @@ def run(cfg: dict[str, Any], resume: Path | None = None) -> None:
     train_freq = int(cfg["agent"].get("train_freq", 4))
 
     eval_env: KirbyEnv | None = None
-    next_eval = start_frames + eval_every
-    next_ckpt = start_frames + ckpt_every
+    # Evaluaciones y checkpoints en una grilla fija (múltiplos de eval_every),
+    # también al reanudar, para que las curvas de distintas semillas se alineen.
+    next_eval = int(saved_loop.get("next_eval", (start_frames // eval_every + 1) * eval_every))
+    next_ckpt = int(saved_loop.get("next_ckpt", (start_frames // ckpt_every + 1) * ckpt_every))
+    # Estado del bucle que se guarda en cada checkpoint (para reanudar epsilon).
+    loop: dict[str, Any] = {"next_eval": next_eval, "next_ckpt": next_ckpt}
+    first_reset = True
 
-    episode = 0
     print(f"Salida: {run_dir}")
     print(f"Presupuesto: {train_cfg['total_frames']} frames | device={device}\n")
 
@@ -184,8 +196,19 @@ def run(cfg: dict[str, Any], resume: Path | None = None) -> None:
             if env.total_frames >= phase_end:
                 continue  # fase ya completada (resume)
 
-            eps = EpsilonSchedule(phase.epsilon_start, _eps_end(cfg), phase.epsilon_decay)
-            eps_origin = env.total_frames if env.total_frames > phase_start else phase_start
+            if saved_loop.get("phase") == phase.name:
+                # Reanudar con el mismo schedule de epsilon (incluye reinicios por etapa).
+                eps_start = float(saved_loop["eps_start"])
+                eps_decay = int(saved_loop["eps_decay"])
+                eps_origin = int(saved_loop["eps_origin"])
+                saved_loop = {}
+            else:
+                eps_start, eps_decay = phase.epsilon_start, phase.epsilon_decay
+                eps_origin = max(env.total_frames, phase_start)
+            eps = EpsilonSchedule(eps_start, _eps_end(cfg), eps_decay)
+            loop.update(
+                phase=phase.name, eps_start=eps_start, eps_decay=eps_decay, eps_origin=eps_origin
+            )
             print(f"== Fase {phase.name} ({phase.frames} frames) ==")
 
             while env.total_frames < phase_end:
@@ -196,7 +219,11 @@ def run(cfg: dict[str, Any], resume: Path | None = None) -> None:
                     stage = phase.stage or SPAWN
                     goal = phase.goal
 
-                obs, info = env.reset(options={"stage": stage, "goal": goal})
+                # Se siembra solo el primer reset del proceso; luego el RNG del
+                # entorno avanza solo (no-ops distintos en cada episodio).
+                reset_seed = seed * 1_000_003 + episode if first_reset else None
+                first_reset = False
+                obs, info = env.reset(seed=reset_seed, options={"stage": stage, "goal": goal})
 
                 ep_return = 0.0
                 last_loss: float | None = None
@@ -209,7 +236,9 @@ def run(cfg: dict[str, Any], resume: Path | None = None) -> None:
                     next_obs, reward, terminated, truncated, info = env.step(action)
                     done = terminated or truncated
 
-                    agent.push(obs, action, reward, next_obs, done)
+                    # Solo `terminated` corta el bootstrap: un timeout no es un
+                    # estado terminal del MDP.
+                    agent.push(obs, action, reward, next_obs, terminated)
                     if env.episode_steps % train_freq == 0:
                         loss = agent.update()
                         if loss is not None:
@@ -222,14 +251,14 @@ def run(cfg: dict[str, Any], resume: Path | None = None) -> None:
                 won = bool(info.get("won", False))
 
                 if phase.scheduler is not None:
-                    phase.scheduler.add_steps(stage, env.episode_steps)
+                    phase.scheduler.add_frames(stage, env.episode_frames)
                     phase.scheduler.record_episode(stage, won, epsilon)
                     new_stage = phase.scheduler.maybe_advance()
                     if new_stage is not None:
-                        eps = EpsilonSchedule(
-                            _stage_eps_start(cfg), _eps_end(cfg), _stage_eps_decay(cfg)
-                        )
+                        eps_start, eps_decay = _stage_eps_start(cfg), _stage_eps_decay(cfg)
+                        eps = EpsilonSchedule(eps_start, _eps_end(cfg), eps_decay)
                         eps_origin = env.total_frames
+                        loop.update(eps_start=eps_start, eps_decay=eps_decay, eps_origin=eps_origin)
                         print(
                             f"[frame {env.total_frames}] avance -> {new_stage} "
                             f"(epsilon reiniciado a {_stage_eps_start(cfg)})"
@@ -270,7 +299,8 @@ def run(cfg: dict[str, Any], resume: Path | None = None) -> None:
                 # ------------------------------------------------------ #
                 if env.total_frames >= next_eval:
                     eval_env, metrics = _run_eval(
-                        agent, eval_env, cfg, env.total_frames, episode, phase.name, eval_episodes
+                        agent, eval_env, cfg, next_eval, env.total_frames,
+                        episode, phase.name, eval_episodes,
                     )
                     evals_log.log(**metrics)
                     print(
@@ -279,12 +309,14 @@ def run(cfg: dict[str, Any], resume: Path | None = None) -> None:
                         f"retorno {metrics['return_mean']:.2f}"
                     )
                     next_eval += eval_every
+                    loop["next_eval"] = next_eval
 
                 if env.total_frames >= next_ckpt:
-                    _save_checkpoint(agent, phases, cfg, run_dir, env, episode)
                     next_ckpt += ckpt_every
+                    loop["next_ckpt"] = next_ckpt
+                    _save_checkpoint(agent, phases, cfg, run_dir, env, episode, loop)
 
-            _save_checkpoint(agent, phases, cfg, run_dir, env, episode)
+            _save_checkpoint(agent, phases, cfg, run_dir, env, episode, loop)
             if phase.scheduler is not None:
                 print(phase.scheduler.summary())
 
@@ -292,7 +324,8 @@ def run(cfg: dict[str, Any], resume: Path | None = None) -> None:
         # Evaluación final (100 episodios): base para S_final y P2
         # -------------------------------------------------------------- #
         eval_env, metrics = _run_eval(
-            agent, eval_env, cfg, env.total_frames, episode, "final", final_eval_episodes
+            agent, eval_env, cfg, int(train_cfg["total_frames"]), env.total_frames,
+            episode, "final", final_eval_episodes,
         )
         evals_log.log(**metrics)
         save_json(metrics, run_dir / "final_eval.json")
@@ -307,7 +340,7 @@ def run(cfg: dict[str, Any], resume: Path | None = None) -> None:
         print("\nInterrumpido: guardando checkpoint final...")
     finally:
         if env.total_frames > 0:
-            _save_checkpoint(agent, phases, cfg, run_dir, env, episode)
+            _save_checkpoint(agent, phases, cfg, run_dir, env, episode, loop)
         episodes_log.close()
         evals_log.close()
         env.close()
@@ -336,17 +369,32 @@ def _run_eval(
     eval_env: KirbyEnv | None,
     cfg: dict[str, Any],
     frame: int,
+    frame_actual: int,
     episode: int,
     phase: str,
     episodes: int,
 ) -> tuple[KirbyEnv, dict[str, Any]]:
+    """Evaluación greedy; por defecto full-level (spawn -> jefe).
+
+    `train.eval_stage` / `train.eval_goal` permiten evaluar una sola etapa
+    (p. ej. el experimento `arena_only`). Los grupos del experimento principal
+    no los definen, así que siguen evaluando el nivel completo.
+
+    `frame` es el punto nominal de la grilla (múltiplo de eval_every) y
+    `frame_actual` el contador real al evaluar.
+    """
     if eval_env is None:
         eval_env = KirbyEnv(cfg["env"])
 
+    stage = cfg["train"].get("eval_stage") or SPAWN
+    # None = la meta local de la etapa (en arena: derrotar al jefe).
+    goal = cfg["train"].get("eval_goal", BOSS_GOAL if stage == SPAWN else None)
     metrics = evaluate_policy(
-        agent, eval_env, stage=SPAWN, goal=BOSS_GOAL, episodes=episodes
+        agent, eval_env, stage=stage, goal=goal, episodes=episodes, seed=EVAL_SEED
     )
-    metrics.update(frame=int(frame), episode=episode, phase=phase)
+    metrics.update(
+        frame=int(frame), frame_actual=int(frame_actual), episode=episode, phase=phase
+    )
     return eval_env, metrics
 
 
@@ -357,11 +405,13 @@ def _save_checkpoint(
     run_dir: Path,
     env: KirbyEnv,
     episode: int,
+    loop: dict[str, Any] | None = None,
 ) -> None:
     extra: dict[str, Any] = {
         "config": config_to_dict(cfg),
         "total_frames": env.total_frames,
         "episode": episode,
+        "loop": dict(loop or {}),
     }
     scheduler = phases[0].scheduler if phases else None
     if scheduler is not None:

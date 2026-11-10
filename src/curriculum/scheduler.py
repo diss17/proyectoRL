@@ -26,7 +26,7 @@ class CurriculumScheduler:
         replay_prob: float = 0.20,
         epsilon_gate: float = 0.10,
         min_episodes_per_stage: int | None = None,
-        fixed_steps_per_stage: int | None = None,
+        fixed_frames_per_stage: int | None = None,
     ) -> None:
         if len(sequence) < 1:
             raise ValueError("La secuencia debe tener al menos una etapa")
@@ -41,7 +41,7 @@ class CurriculumScheduler:
         self.min_episodes = (
             self.window if min_episodes_per_stage is None else int(min_episodes_per_stage)
         )
-        self.fixed_steps_per_stage = fixed_steps_per_stage
+        self.fixed_frames_per_stage = fixed_frames_per_stage
         self.adaptive = threshold is not None
 
         self.position = 0
@@ -50,7 +50,8 @@ class CurriculumScheduler:
         }
         self.stage_episodes = {s: 0 for s in self.stage_ids}
         self.stage_wins = {s: 0 for s in self.stage_ids}
-        self.stage_steps = {s: 0 for s in self.stage_ids}
+        # Frames de emulador acumulados por etapa (presupuesto real de experiencia).
+        self.stage_frames = {s: 0 for s in self.stage_ids}
         self.stage_ignored = {s: 0 for s in self.stage_ids}
         self.transitions: list[dict[str, Any]] = []
 
@@ -78,9 +79,10 @@ class CurriculumScheduler:
     # Registro
     # ------------------------------------------------------------------ #
 
-    def add_steps(self, stage: str, steps: int) -> None:
-        if stage in self.stage_steps:
-            self.stage_steps[stage] += int(steps)
+    def add_frames(self, stage: str, frames: int) -> None:
+        """Suma frames de emulador (no pasos de agente) a la etapa."""
+        if stage in self.stage_frames:
+            self.stage_frames[stage] += int(frames)
 
     def record_episode(self, stage: str, won: bool, epsilon: float | None = None) -> bool:
         """Registra un episodio. Devuelve si entró en la ventana de decisión.
@@ -123,8 +125,8 @@ class CurriculumScheduler:
 
         stage = self.current_stage
 
-        if self.fixed_steps_per_stage is not None:
-            return self.stage_steps[stage] >= self.fixed_steps_per_stage
+        if self.fixed_frames_per_stage is not None:
+            return self.stage_frames[stage] >= self.fixed_frames_per_stage
 
         if not self.adaptive:
             return False
@@ -140,7 +142,7 @@ class CurriculumScheduler:
         if self.adaptive:
             criterion = f"win_rate={self.win_rate(stage):.2%}"
         else:
-            criterion = f"steps={self.stage_steps[stage]}"
+            criterion = f"frames={self.stage_frames[stage]}"
 
         self.position += 1
         new_stage = self.current_stage
@@ -167,12 +169,12 @@ class CurriculumScheduler:
             "replay_prob": self.replay_prob,
             "epsilon_gate": self.epsilon_gate,
             "min_episodes": self.min_episodes,
-            "fixed_steps_per_stage": self.fixed_steps_per_stage,
+            "fixed_frames_per_stage": self.fixed_frames_per_stage,
             "position": self.position,
             "history": {s: list(h) for s, h in self._history.items()},
             "stage_episodes": dict(self.stage_episodes),
             "stage_wins": dict(self.stage_wins),
-            "stage_steps": dict(self.stage_steps),
+            "stage_frames": dict(self.stage_frames),
             "stage_ignored": dict(self.stage_ignored),
             "transitions": list(self.transitions),
         }
@@ -184,7 +186,7 @@ class CurriculumScheduler:
         self.replay_prob = float(state["replay_prob"])
         self.epsilon_gate = float(state["epsilon_gate"])
         self.min_episodes = int(state["min_episodes"])
-        self.fixed_steps_per_stage = state["fixed_steps_per_stage"]
+        self.fixed_frames_per_stage = state["fixed_frames_per_stage"]
         self.adaptive = self.threshold is not None
         self.position = int(state["position"])
         self._history = {
@@ -192,7 +194,7 @@ class CurriculumScheduler:
         }
         self.stage_episodes = dict(state["stage_episodes"])
         self.stage_wins = dict(state["stage_wins"])
-        self.stage_steps = dict(state["stage_steps"])
+        self.stage_frames = dict(state["stage_frames"])
         self.stage_ignored = dict(state.get("stage_ignored", self.stage_ignored))
         self.transitions = list(state["transitions"])
 
@@ -208,7 +210,7 @@ class CurriculumScheduler:
                 f"win={self.win_rate(stage):6.2%} "
                 f"ventana={self.window_size(stage)}/{self.window} "
                 f"ignorados={self.stage_ignored[stage]} "
-                f"pasos={self.stage_steps[stage]}"
+                f"frames={self.stage_frames[stage]}"
             )
         return "\n".join(rows)
 
@@ -221,5 +223,5 @@ def build_scheduler(cfg: dict[str, Any], sequence: Sequence[str]) -> CurriculumS
         replay_prob=cfg.get("replay_prob", 0.20),
         epsilon_gate=cfg.get("epsilon_gate", 0.10),
         min_episodes_per_stage=cfg.get("min_episodes_per_stage"),
-        fixed_steps_per_stage=cfg.get("fixed_steps_per_stage"),
+        fixed_frames_per_stage=cfg.get("fixed_frames_per_stage"),
     )

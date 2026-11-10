@@ -72,9 +72,9 @@ local por etapa**. Solo cambia el orden.
 
 | ID | Save state | Contenido | Meta local |
 |---|---|---|---|
-| `spawn` | `phase3_spawn.state` | Sala 0: tramo exterior 1 | llegar a `mid` |
+| `spawn` | `phase3_spawn.state` | Sala 0 + inicio de sala 2 | llegar a `mid` y derrotar a Poppy Bros. Sr. |
 | `mid` | `phase2_mid.state` | Sala 2: tramo exterior 2 | llegar a `door` |
-| `door` | `phase1_door.state` | Sala 3: interior del árbol | entrar a `arena` |
+| `door` | `phase1_door.state` | Sala 3: subida vertical del árbol, desde la entrada (abajo) | entrar a `arena` |
 | `arena` | `phase0_whispy.state` | Sala 4: combate contra Whispy | derrotar al jefe |
 
 ### Secuencias
@@ -258,7 +258,21 @@ proyectoRL/
 - **Descuento:** `γ = 0.997` (horizonte ~330 pasos). Con `γ = 0.99` y episodios
   de 4000 pasos la recompensa terminal es invisible desde el inicio.
 - **Buffer:** 20.000 observaciones (~1.1 GB). Con 100k no cabe en RAM.
-- **Checkpoint:** guarda agente **y** estado del scheduler.
+- **Checkpoint:** guarda agente, estado del scheduler y del bucle (schedule de ε,
+  episodio, próxima eval). El replay buffer no se guarda.
+- **Estocasticidad:** PyBoy es determinista; cada `reset()` ejecuta U{0..30}
+  frames sin input (`reset_noop_max`). Sin esto, la evaluación greedy repite el
+  mismo episodio y el win rate solo puede ser 0 % o 100 %. Las evaluaciones usan
+  semillas fijas (`EVAL_SEED + i`), iguales para todos los grupos → pareadas.
+- **Meta `boss`:** solo se arma dentro de la arena (`room == 4`); `boss_hp`
+  también refleja la vida de Poppy Bros. Sr. (vale 3 al inicio de la sala 2;
+  verificado con la ROM).
+- **Muerte:** `hp <= 0` **o** perder una vida (`lives`, 0xD089), para detectar
+  caídas a pozos.
+- **Timeouts:** se guardan en el buffer como no terminales (solo `terminated`
+  corta el bootstrap).
+- **Evals:** `frame` en `evals.csv` es el punto nominal de la grilla (múltiplo de
+  250k), `frame_actual` el contador real; la eval final no entra en P1 ni en la curva.
 
 ---
 
